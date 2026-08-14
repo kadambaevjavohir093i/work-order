@@ -76,6 +76,10 @@ BREAKS_AFTER = {"DRIVER NAME", "TIME CALLED", "ISSUE", "PAYMENT METHOD"}
 # always shown in caps, whether parsed from the message or typed as an edit
 UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY"}
 
+# dropped from FLEET MEMBER — work profiles are often named "Jacob Fleet".
+# Add more words here if your team's profile names carry other job labels.
+NAME_NOISE = {"FLEET"}
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fleet-form-bot")
 
@@ -272,9 +276,10 @@ def parse_edits(text: str) -> dict | None:
 
 def fleet_member_for(update: Update) -> str:
     uid = update.effective_user.id
-    if uid in NAME_OVERRIDE:
-        return NAME_OVERRIDE[uid]
-    return (update.effective_user.first_name or "").strip()
+    raw = NAME_OVERRIDE.get(uid) or (update.effective_user.first_name or "")
+    kept = [w for w in raw.split() if w.upper().strip(".,") not in NAME_NOISE]
+    # if the name is nothing but noise, keep it rather than send an empty field
+    return " ".join(kept) or raw.strip()
 
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
