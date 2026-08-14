@@ -331,8 +331,23 @@ def main():
     app.add_handler(CommandHandler("name", set_name))
     app.add_handler(CommandHandler("last", last))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
-    log.info("bot running")
-    app.run_polling()
+
+    # Render web services must bind $PORT, so run as a webhook there.
+    # Anywhere else (laptop, Render background worker) fall back to long polling.
+    url = os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    port = os.environ.get("PORT")
+    if url and port:
+        log.info("bot running (webhook)")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=int(port),
+            url_path=token,
+            webhook_url=f"{url.rstrip('/')}/{token}",
+            secret_token=os.environ.get("WEBHOOK_SECRET") or None,
+        )
+    else:
+        log.info("bot running (polling)")
+        app.run_polling()
 
 
 if __name__ == "__main__":
