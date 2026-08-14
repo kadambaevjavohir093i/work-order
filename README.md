@@ -3,7 +3,7 @@
 Telegram bot ([@work_0rder_bot](https://t.me/work_0rder_bot)) that turns a raw
 dispatch message into a filled repair form.
 
-Send it the raw message and it replies with the form in a tap-to-copy block.
+Send it the raw message and it replies with the filled form as a plain message.
 Correct any field by replying with `FIELD: value` lines.
 
 ```

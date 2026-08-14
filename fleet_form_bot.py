@@ -9,7 +9,7 @@ Setup:
     python fleet_form_bot.py
 
 Usage in Telegram:
-    - Paste the raw message  -> bot replies with the filled form (tap to copy).
+    - Paste the raw message  -> bot replies with the filled form.
     - Reply/send edits like  -> QM PO#: 884512
                                 TIME CALLED: 3:40 PM
       and the bot re-sends the corrected form.
@@ -17,7 +17,6 @@ Usage in Telegram:
     - /last                  -> re-send the last form
 """
 
-import html
 import logging
 import os
 import re
@@ -25,7 +24,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
-from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -236,10 +234,6 @@ def render(f: dict) -> str:
     return "\n".join(out)
 
 
-def as_copyable(f: dict) -> str:
-    return f"<pre>{html.escape(render(f))}</pre>"
-
-
 # ----------------------------------------------------------------- edits ----
 
 EDIT_RE = re.compile(r"^\s*([A-Za-z#,\s]+?)\s*[:=]\s*(.*)$")
@@ -301,7 +295,7 @@ async def last(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not f:
         await update.message.reply_text("Nothing yet — send a message first.")
         return
-    await update.message.reply_text(as_copyable(f), parse_mode=ParseMode.HTML)
+    await update.message.reply_text(render(f))
 
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -311,14 +305,12 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     edits = parse_edits(text)
     if edits and chat_id in LAST_FORM:
         LAST_FORM[chat_id].update(edits)
-        await update.message.reply_text(
-            as_copyable(LAST_FORM[chat_id]), parse_mode=ParseMode.HTML
-        )
+        await update.message.reply_text(render(LAST_FORM[chat_id]))
         return
 
     f = parse_message(text, fleet_member_for(update))
     LAST_FORM[chat_id] = f
-    await update.message.reply_text(as_copyable(f), parse_mode=ParseMode.HTML)
+    await update.message.reply_text(render(f))
 
 
 def main():
