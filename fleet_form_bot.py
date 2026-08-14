@@ -38,6 +38,7 @@ TZ = ZoneInfo("America/New_York")   # date follows US ops time, not Tashkent
 DATE_FMT = "%m/%d/%Y"
 DEFAULT_TIME_CALLED = "NA"
 EMPTY_VALUE = "NA"   # shown for any field the message did not fill
+NO_FILL_FIELDS = {"QM PO#", "CASE"}   # except these — left blank to fill in by hand
 
 # SERVICE / REPRESENTATIVE detail level
 SERVICE_FULL_NAME = True   # True -> "Brothers Truck Repair"  | False -> "Brothers"
@@ -236,10 +237,12 @@ def parse_message(text: str, fleet_member: str) -> dict:
 def render(f: dict) -> str:
     out = []
     for key in FIELDS:
-        val = (f.get(key) or "").strip() or EMPTY_VALUE
+        val = (f.get(key) or "").strip()
+        if not val and key not in NO_FILL_FIELDS:
+            val = EMPTY_VALUE
         if key in UPPER_FIELDS:
             val = val.upper()
-        out.append(f"{key}: {val}")
+        out.append(f"{key}: {val}".rstrip())
         if key in BREAKS_AFTER:
             out.append("")
     return "\n".join(out)
