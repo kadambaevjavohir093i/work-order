@@ -74,7 +74,7 @@ FIELDS = [
 BREAKS_AFTER = {"DRIVER NAME", "TIME CALLED", "ISSUE", "PAYMENT METHOD"}
 
 # always shown in caps, whether parsed from the message or typed as an edit
-UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY"}
+UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY", "ISSUE"}
 
 # dropped from FLEET MEMBER — work profiles are often named "Jacob Fleet".
 # Add more words here if your team's profile names carry other job labels.
