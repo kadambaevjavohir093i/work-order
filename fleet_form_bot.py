@@ -73,6 +73,9 @@ FIELDS = [
 # blank line groups in the rendered form (after these fields)
 BREAKS_AFTER = {"DRIVER NAME", "TIME CALLED", "ISSUE", "PAYMENT METHOD"}
 
+# always shown in caps, whether parsed from the message or typed as an edit
+UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY"}
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fleet-form-bot")
 
@@ -228,7 +231,10 @@ def parse_message(text: str, fleet_member: str) -> dict:
 def render(f: dict) -> str:
     out = []
     for key in FIELDS:
-        out.append(f"{key}: {f.get(key, '')}".rstrip())
+        val = f.get(key, "")
+        if key in UPPER_FIELDS:
+            val = val.upper()
+        out.append(f"{key}: {val}".rstrip())
         if key in BREAKS_AFTER:
             out.append("")
     return "\n".join(out)
