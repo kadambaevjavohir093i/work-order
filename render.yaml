@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: work-order-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python fleet_form_bot.py
+    # No healthCheckPath: the bot serves only the webhook path, so a health
+    # probe on / would 404 and Render would kill the deploy.
+    envVars:
+      # Set in the Render dashboard, never in this file.
+      - key: BOT_TOKEN
+        sync: false
+      # Optional. If set, Telegram signs each webhook call with it.
+      # Allowed characters: A-Z a-z 0-9 _ - (Telegram rejects anything else).
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.9"
