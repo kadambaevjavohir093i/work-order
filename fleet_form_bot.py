@@ -12,7 +12,9 @@ Usage in Telegram:
     - Paste the raw message  -> bot replies with the filled form.
     - Reply/send edits like  -> QM PO#: 884512
                                 TIME CALLED: 3:40 PM
-      and the bot re-sends the corrected form.
+      and the bot re-sends the corrected form. Replying to a form edits that
+      form, so corrections survive a restart; a bare edit needs the last form
+      still in memory.
     - /name Jacob            -> override FLEET MEMBER for your account
     - /last                  -> re-send the last form
 """
@@ -310,6 +312,23 @@ FIELD_LOOKUP.update({
 })
 
 
+FIELD_SET = set(FIELDS)
+
+
+def form_from_text(text: str) -> dict | None:
+    """Rebuild a form from one the bot already sent. Telegram hands back the
+    reply's text without the bold markup, so the labels parse straight off."""
+    f = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        m = re.match(r"^\s*([^:]+):\s*(.*)$", line)
+        if not m or m.group(1).strip().upper() not in FIELD_SET:
+            return None
+        f[m.group(1).strip().upper()] = m.group(2).strip()
+    return f or None
+
+
 def parse_edits(text: str) -> dict | None:
     edits = {}
     for line in text.splitlines():
@@ -341,6 +360,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Fix a field by sending lines like:\n"
         "QM PO#: 884512\n"
         "TIME CALLED: 3:40 PM\n\n"
+        "Reply to a form to correct that one — that always works, even after "
+        "I've restarted.\n\n"
         "/name <name> — set FLEET MEMBER\n"
         "/last — resend last form"
     )
@@ -367,10 +388,23 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     edits = parse_edits(text)
-    if edits and chat_id in LAST_FORM:
-        LAST_FORM[chat_id].update(edits)
+    if edits:
+        # a reply carries its own form, so corrections still work after a
+        # restart has emptied LAST_FORM
+        reply_to = update.message.reply_to_message
+        base = form_from_text(reply_to.text) if reply_to and reply_to.text else None
+        if base is None:
+            base = LAST_FORM.get(chat_id)
+        if base is None:
+            await update.message.reply_text(
+                "No form to edit yet. Send the dispatch message first, then "
+                "reply to the form with your corrections."
+            )
+            return
+        base.update(edits)
+        LAST_FORM[chat_id] = base
         await update.message.reply_text(
-            render_html(LAST_FORM[chat_id]), parse_mode=ParseMode.HTML
+            render_html(base), parse_mode=ParseMode.HTML
         )
         return
 

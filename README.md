@@ -4,7 +4,7 @@ Telegram bot ([@work_0rder_bot](https://t.me/work_0rder_bot)) that turns a raw
 dispatch message into a filled repair form.
 
 Send it the raw message and it replies with the filled form, field names in bold.
-Correct any field by replying with `FIELD: value` lines.
+Correct any field by replying to the form with `FIELD: value` lines.
 
 ```
 DM WOLD                                    FLEET MEMBER: Jacob
@@ -69,6 +69,8 @@ Both live at the top of `fleet_form_bot.py`:
 ## Notes
 
 - Forms are held in memory, so a restart (or a free-plan sleep) clears `/last`
-  and any `/name` overrides.
+  and any `/name` overrides. Editing still works across a restart as long as you
+  **reply** to the form you want to change — the bot reads the fields back out
+  of the message instead of its own memory.
 - In a group chat everyone shares one current form, but each person keeps their
   own `FLEET MEMBER` name.
