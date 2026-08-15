@@ -63,11 +63,17 @@ PAYMENT_WORDS = [
     "ryder",
 ]
 
-# who pays — pulled out of the payment line ("comcheck driver pay" -> driver)
+# who pays — pulled out of the payment line ("comcheck driver pay" -> driver).
+# A word in both lists (ryder) fills both fields from a single mention, and a
+# more specific party word still wins: "ryder driver" -> RYDER / DRIVER.
 RESPONSIBLE_WORDS = [
     "driver", "company", "carrier", "owner operator", "o/o", "owner",
-    "shop", "warranty", "broker", "customer",
+    "shop", "warranty", "broker", "customer", "ryder",
 ]
+
+# the party words that are not also payment methods, checked first so
+# "ryder shop" resolves the party to SHOP and only a lone "ryder" means RYDER
+PARTY_ONLY_WORDS = [w for w in RESPONSIBLE_WORDS if w not in PAYMENT_WORDS]
 
 FIELDS = [
     "FLEET MEMBER", "COMPANY", "DRIVER NAME",
@@ -258,7 +264,7 @@ def parse_message(text: str, fleet_member: str) -> dict:
     if payment_block:
         joined = " ".join(payment_block).strip()
         method = find_term(joined, PAYMENT_WORDS)
-        party = find_term(joined, RESPONSIBLE_WORDS)
+        party = find_term(joined, PARTY_ONLY_WORDS) or find_term(joined, RESPONSIBLE_WORDS)
         f["PAYMENT METHOD"] = method or joined
         if party:
             f["RESPONSIBLE PARTY"] = party
