@@ -17,6 +17,7 @@ Usage in Telegram:
     - /last                  -> re-send the last form
 """
 
+import html
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -76,7 +78,7 @@ FIELDS = [
 BREAKS_AFTER = {"DRIVER NAME", "TIME CALLED", "ISSUE", "PAYMENT METHOD"}
 
 # always shown in caps, whether parsed from the message or typed as an edit
-UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY", "ISSUE"}
+UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY", "ISSUE", "FLEET MEMBER"}
 
 # dropped from FLEET MEMBER — work profiles are often named "Jacob Fleet".
 # Add more words here if your team's profile names carry other job labels.
@@ -267,15 +269,29 @@ def parse_message(text: str, fleet_member: str) -> dict:
 
 # ---------------------------------------------------------------- render ----
 
+def field_value(f: dict, key: str) -> str:
+    val = (f.get(key) or "").strip()
+    if not val and key not in NO_FILL_FIELDS:
+        val = EMPTY_VALUE
+    return val.upper() if key in UPPER_FIELDS else val
+
+
 def render(f: dict) -> str:
     out = []
     for key in FIELDS:
-        val = (f.get(key) or "").strip()
-        if not val and key not in NO_FILL_FIELDS:
-            val = EMPTY_VALUE
-        if key in UPPER_FIELDS:
-            val = val.upper()
-        out.append(f"{key}: {val}".rstrip())
+        out.append(f"{key}: {field_value(f, key)}".rstrip())
+        if key in BREAKS_AFTER:
+            out.append("")
+    return "\n".join(out)
+
+
+def render_html(f: dict) -> str:
+    """Same form with the labels in bold. Values are escaped, so an & or a <
+    in a shop name cannot break the markup."""
+    out = []
+    for key in FIELDS:
+        line = f"<b>{key}:</b> {html.escape(field_value(f, key))}".rstrip()
+        out.append(line)
         if key in BREAKS_AFTER:
             out.append("")
     return "\n".join(out)
@@ -343,7 +359,7 @@ async def last(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not f:
         await update.message.reply_text("Nothing yet — send a message first.")
         return
-    await update.message.reply_text(render(f))
+    await update.message.reply_text(render_html(f), parse_mode=ParseMode.HTML)
 
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -353,12 +369,14 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     edits = parse_edits(text)
     if edits and chat_id in LAST_FORM:
         LAST_FORM[chat_id].update(edits)
-        await update.message.reply_text(render(LAST_FORM[chat_id]))
+        await update.message.reply_text(
+            render_html(LAST_FORM[chat_id]), parse_mode=ParseMode.HTML
+        )
         return
 
     f = parse_message(text, fleet_member_for(update))
     LAST_FORM[chat_id] = f
-    await update.message.reply_text(render(f))
+    await update.message.reply_text(render_html(f), parse_mode=ParseMode.HTML)
 
 
 def main():
