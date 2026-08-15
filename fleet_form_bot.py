@@ -260,6 +260,29 @@ def split_label(line: str) -> tuple[str | None, str]:
     return None, line
 
 
+# "TRL hose REPLACE note hello" — a note started part way through a line.
+INLINE_NOTE_RE = re.compile(r"\bnotes?\b\s*[:\-]?\s*", re.I)
+
+
+def extract_inline_note(lines: list[str]) -> tuple[list[str], str]:
+    """Split a note off the middle of a line. Only fires when the message says
+    "note" exactly once, so an ambiguous message is left alone rather than
+    guessed at."""
+    hits = [(i, m) for i, l in enumerate(lines)
+            for m in [INLINE_NOTE_RE.search(l)] if m]
+    if len(hits) != 1:
+        return lines, ""
+    i, m = hits[0]
+    before, after = lines[i][:m.start()].strip(), lines[i][m.end():].strip()
+    if not after:
+        return lines, ""
+    out = list(lines)
+    out[i] = before
+    if not before:
+        del out[i]
+    return out, after
+
+
 def extract_labels(text: str) -> tuple[str, dict]:
     """Pull labeled lines out of the message and return what is left to parse
     positionally, plus the values the sender named outright."""
@@ -274,6 +297,11 @@ def extract_labels(text: str) -> tuple[str, dict]:
         explicit[field] = f"{explicit[field]} {value}".strip() if field in explicit else value
         if field in STRUCTURAL_FIELDS:
             kept.append(value)
+    # a note that started mid-line, but only when nothing already claimed NOTE
+    if "NOTE" not in explicit:
+        kept, note = extract_inline_note(kept)
+        if note:
+            explicit["NOTE"] = note
     return "\n".join(kept), explicit
 
 
