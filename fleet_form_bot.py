@@ -113,10 +113,22 @@ PUNCT_SEP = re.compile(r"[|/\\:;,><+&]+")
 PART_SEP = re.compile(r"[\s|/\\:;,><&]+")
 
 
+# stand-ins for a value the sender does not have ("NA 233561PLA" = no truck)
+UNIT_PLACEHOLDERS = {"NA", "N/A", "N.A.", "NONE", "NO", "NIL", "X", "XX", "-", "--", "?"}
+
+
 def split_parts(line: str) -> list[str]:
     """Split "212654 | 2335614PLA", "212654/2335614PLA", "212654 2335614PLA"
     and friends into their separate values."""
-    return [p for p in PART_SEP.split(line.strip()) if p]
+    # keep "N/A" in one piece, otherwise the "/" separator would halve it
+    line = re.sub(r"\bN\s*[/.]\s*A\b\.?", "NA", line.strip(), flags=re.I)
+    return [p for p in PART_SEP.split(line) if p]
+
+
+def is_unit_part(p: str) -> bool:
+    return p.upper() in UNIT_PLACEHOLDERS or bool(
+        re.fullmatch(r"[A-Za-z]{0,4}\d[\w\-]*", p)
+    )
 
 
 def looks_like_phone(line: str) -> bool:
@@ -139,7 +151,10 @@ def looks_like_units(line: str) -> bool:
     parts = split_parts(line)
     if not parts or looks_like_phone(line):
         return False
-    return all(re.fullmatch(r"[A-Za-z]{0,4}\d[\w\-]*", p) for p in parts)
+    # every part is a unit or a placeholder, and at least one is a real unit,
+    # so a line that is nothing but "NA" is not swallowed as a unit line
+    real = [p for p in parts if p.upper() not in UNIT_PLACEHOLDERS]
+    return bool(real) and all(is_unit_part(p) for p in parts)
 
 
 def looks_like_names(line: str) -> bool:
@@ -210,7 +225,10 @@ def parse_message(text: str, fleet_member: str) -> dict:
         hi += 1
     for line in header[hi:]:
         if looks_like_units(line) and not f["TRUCK#"]:
-            parts = split_parts(line)
+            # a placeholder becomes empty so render() shows EMPTY_VALUE,
+            # whichever stand-in the sender happened to type
+            parts = ["" if p.upper() in UNIT_PLACEHOLDERS else p
+                     for p in split_parts(line)]
             f["TRUCK#"] = parts[0] if parts else ""
             f["TRAILER#"] = parts[1] if len(parts) > 1 else ""
         elif looks_like_phone(line) and not f["PHONE#"]:
