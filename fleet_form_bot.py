@@ -107,9 +107,26 @@ def find_term(text: str, terms: list[str]) -> str:
     return ""
 
 
+# Two values on one line can be separated however the sender felt like it.
+# "-" is deliberately absent: it shows up inside trailer numbers and phones.
+PUNCT_SEP = re.compile(r"[|/\\:;,><+&]+")
+PART_SEP = re.compile(r"[\s|/\\:;,><&]+")
+
+
+def split_parts(line: str) -> list[str]:
+    """Split "212654 | 2335614PLA", "212654/2335614PLA", "212654 2335614PLA"
+    and friends into their separate values."""
+    return [p for p in PART_SEP.split(line.strip()) if p]
+
+
 def looks_like_phone(line: str) -> bool:
-    d = digits(line)
-    return 9 <= len(d) <= 24 and not re.search(r"[A-Za-z]{3,}", line)
+    # every separated chunk has to look like a phone, so "212654 | 2335614PLA"
+    # is not mistaken for two numbers just because the digits add up
+    chunks = [c.strip() for c in PUNCT_SEP.split(line) if c.strip()]
+    return bool(chunks) and all(
+        9 <= len(digits(c)) <= 15 and not re.search(r"[A-Za-z]{3,}", c)
+        for c in chunks
+    )
 
 
 def looks_like_address(line: str) -> bool:
@@ -119,12 +136,10 @@ def looks_like_address(line: str) -> bool:
 
 
 def looks_like_units(line: str) -> bool:
-    if "|" in line:
-        return True
-    toks = line.split()
-    return bool(toks) and all(
-        re.fullmatch(r"[A-Za-z]{0,4}\d[\w\-]*", t) for t in toks
-    )
+    parts = split_parts(line)
+    if not parts or looks_like_phone(line):
+        return False
+    return all(re.fullmatch(r"[A-Za-z]{0,4}\d[\w\-]*", p) for p in parts)
 
 
 def looks_like_names(line: str) -> bool:
@@ -195,7 +210,7 @@ def parse_message(text: str, fleet_member: str) -> dict:
         hi += 1
     for line in header[hi:]:
         if looks_like_units(line) and not f["TRUCK#"]:
-            parts = [p.strip() for p in re.split(r"[|/]", line) if p.strip()]
+            parts = split_parts(line)
             f["TRUCK#"] = parts[0] if parts else ""
             f["TRAILER#"] = parts[1] if len(parts) > 1 else ""
         elif looks_like_phone(line) and not f["PHONE#"]:
