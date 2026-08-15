@@ -83,6 +83,25 @@ FIELDS = [
     "PAYMENT METHOD", "LOC", "NOTE",
 ]
 
+# how a field may be named at the front of a line, in the message or in an edit
+FIELD_LOOKUP = {k.replace(" ", "").replace("#", "").replace(",", "").upper(): k for k in FIELDS}
+FIELD_LOOKUP.update({
+    "QM": "QM PO#", "QMPO": "QM PO#", "PO": "QM PO#",
+    "TIME": "TIME CALLED", "REP": "REPRESENTATIVE",
+    "TRUCK": "TRUCK#", "TRAILER": "TRAILER#", "PHONE": "PHONE#",
+    "DRIVER": "DRIVER NAME", "SHOP": "SERVICE",
+    "RP": "RESPONSIBLE PARTY", "INFORMED": "IF DRIVER, INFORMED",
+    "ADDRESS": "LOC", "LOCATION": "LOC", "NOTES": "NOTE",
+})
+
+# A labeled line for one of these keeps its place in the message with only the
+# label removed, because the block detector needs the shop's shape intact.
+# Every other labeled line is lifted out so it cannot bleed into ISSUE.
+STRUCTURAL_FIELDS = {
+    "COMPANY", "DRIVER NAME", "TRUCK#", "TRAILER#", "PHONE#",
+    "SERVICE", "REPRESENTATIVE", "LOC",
+}
+
 # blank line groups in the rendered form (after these fields)
 BREAKS_AFTER = {"DRIVER NAME", "TIME CALLED", "ISSUE", "PAYMENT METHOD"}
 
@@ -142,10 +161,19 @@ def is_unit_part(p: str) -> bool:
     )
 
 
+# "Ph: +15134770709" is still a phone line. The prefix is ignored when working
+# out what a line is, but the value kept on the form is the line as sent.
+LEAD_LABEL_RE = re.compile(r"^\s*[A-Za-z][A-Za-z.\s#]{0,14}[:=]\s*")
+
+
+def unlabeled(line: str) -> str:
+    return LEAD_LABEL_RE.sub("", line, count=1).strip() or line
+
+
 def looks_like_phone(line: str) -> bool:
     # every separated chunk has to look like a phone, so "212654 | 2335614PLA"
     # is not mistaken for two numbers just because the digits add up
-    chunks = [c.strip() for c in PUNCT_SEP.split(line) if c.strip()]
+    chunks = [c.strip() for c in PUNCT_SEP.split(unlabeled(line)) if c.strip()]
     return bool(chunks) and all(
         9 <= len(digits(c)) <= 15 and not re.search(r"[A-Za-z]{3,}", c)
         for c in chunks
@@ -153,6 +181,7 @@ def looks_like_phone(line: str) -> bool:
 
 
 def looks_like_address(line: str) -> bool:
+    line = unlabeled(line)
     return bool(re.search(r"\d.*\b[A-Z]{2}\b\s*\d{5}", line)) or bool(
         re.search(r"\d+\s+\w+.*,\s*\w+", line)
     )
@@ -203,14 +232,61 @@ def is_shop_block(block: list[str]) -> bool:
 
 # ----------------------------------------------------------------- parse ----
 
+# A label is short and made of letters, so a shop name with a colon in it and
+# a sentence ending in one are both left alone.
+LABEL_RE = re.compile(r"^\s*([A-Za-z#,\s]{1,24}?)\s*[:=]\s*(.*)$")
+
+# Labels that also work with just a space after them. Kept deliberately small:
+# "driver john smith" would be a fair reading, but so would a carrier actually
+# named "Driver Logistics", and the colon form already covers every field.
+BARE_LABELS = {"NOTE", "NOTES"}
+BARE_LABEL_RE = re.compile(r"^\s*([A-Za-z]+)\s+(.+)$")
+
+
+def split_label(line: str) -> tuple[str | None, str]:
+    """'note: closes at 5' -> ('NOTE', 'closes at 5'). A line with no label,
+    or one naming something that is not a field, comes back untouched."""
+    m = LABEL_RE.match(line)
+    if m:
+        key = m.group(1).replace(" ", "").replace("#", "").replace(",", "").upper()
+        field = FIELD_LOOKUP.get(key)
+        if field:
+            return field, m.group(2).strip()
+    # "note waiting for parts" — no colon. Only for labels that cannot be
+    # confused with the start of an ordinary dispatch line.
+    m = BARE_LABEL_RE.match(line)
+    if m and m.group(1).upper() in BARE_LABELS:
+        return FIELD_LOOKUP[m.group(1).upper()], m.group(2).strip()
+    return None, line
+
+
+def extract_labels(text: str) -> tuple[str, dict]:
+    """Pull labeled lines out of the message and return what is left to parse
+    positionally, plus the values the sender named outright."""
+    explicit: dict[str, str] = {}
+    kept = []
+    for line in text.splitlines():
+        field, value = split_label(line)
+        if field is None:
+            kept.append(line)
+            continue
+        # repeating a label adds to it rather than replacing it
+        explicit[field] = f"{explicit[field]} {value}".strip() if field in explicit else value
+        if field in STRUCTURAL_FIELDS:
+            kept.append(value)
+    return "\n".join(kept), explicit
+
+
 def parse_message(text: str, fleet_member: str) -> dict:
     f = {k: "" for k in FIELDS}
     f["FLEET MEMBER"] = fleet_member
     f["DATE"] = datetime.now(TZ).strftime(DATE_FMT)
     f["TIME CALLED"] = DEFAULT_TIME_CALLED
 
+    text, explicit = extract_labels(text)
     blocks = split_blocks(text)
     if not blocks:
+        f.update(explicit)
         return f
 
     shop_block = None
@@ -273,6 +349,8 @@ def parse_message(text: str, fleet_member: str) -> dict:
     issue_lines = [l for b in other_blocks for l in b]
     f["ISSUE"] = " ".join(issue_lines).strip()
 
+    # what the sender named outright beats what the heuristics guessed
+    f.update(explicit)
     return f
 
 
@@ -309,15 +387,6 @@ def render_html(f: dict) -> str:
 # ----------------------------------------------------------------- edits ----
 
 EDIT_RE = re.compile(r"^\s*([A-Za-z#,\s]+?)\s*[:=]\s*(.*)$")
-FIELD_LOOKUP = {k.replace(" ", "").replace("#", "").replace(",", "").upper(): k for k in FIELDS}
-FIELD_LOOKUP.update({
-    "QM": "QM PO#", "QMPO": "QM PO#", "PO": "QM PO#",
-    "TIME": "TIME CALLED", "REP": "REPRESENTATIVE",
-    "TRUCK": "TRUCK#", "TRAILER": "TRAILER#", "PHONE": "PHONE#",
-    "DRIVER": "DRIVER NAME", "SHOP": "SERVICE",
-    "RP": "RESPONSIBLE PARTY", "INFORMED": "IF DRIVER, INFORMED",
-})
-
 
 FIELD_SET = set(FIELDS)
 

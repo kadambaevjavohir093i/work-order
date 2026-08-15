@@ -21,6 +21,21 @@ Brothers Truck Repair
 +15134770709                               LOC: 11949 Tramway Dr, Cincinnati, OH 45241
 ```
 
+## Naming a field directly
+
+Any line may name the field it belongs to, in the message or as a correction:
+
+```
+note: shop closes at 5pm      note driver waiting on site
+loc: 11949 Tramway Dr         shop: Brothers Truck Repair
+```
+
+`note` also works with just a space after it. Every other field needs the colon,
+so a carrier actually named "Driver Logistics" is not mistaken for a label.
+
+A prefix the bot does not recognise (`Ph:`, `Addr:`) does not confuse it either
+— the line is still read as a phone or an address, and stored exactly as sent.
+
 ## Commands
 
 | Command | Effect |
