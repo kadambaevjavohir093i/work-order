@@ -36,6 +36,12 @@ so a carrier actually named "Driver Logistics" is not mistaken for a label.
 A prefix the bot does not recognise (`Ph:`, `Addr:`) does not confuse it either
 — the line is still read as a phone or an address, and stored exactly as sent.
 
+## Empty messages
+
+A message with nothing to parse — a stray `1`, `.`, `+` or the like — gets a
+blank template back instead of a form full of `NA`. Edit `SAMPLE_TEMPLATE` to
+change what it says.
+
 ## Commands
 
 | Command | Effect |

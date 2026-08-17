@@ -112,6 +112,19 @@ UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY", "ISSUE", "FLEET MEMBER"}
 # Add more words here if your team's profile names carry other job labels.
 NAME_NOISE = {"FLEET"}
 
+# sent back when a message carries nothing to parse — a stray "1", ".", "+"
+SAMPLE_TEMPLATE = """PLEASE FILL THIS SAMPLE:
+COMPANY NAME:
+TRUCK | TRAILER #:
+DRIVERS NAME:
+PHONE NUMBERS:
+
+PAYMENT METHOD AND RESPONSIBLE PARTY:
+
+ISSUE:
+
+SHOP INFO:"""
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fleet-form-bot")
 
@@ -195,6 +208,13 @@ def looks_like_units(line: str) -> bool:
     # so a line that is nothing but "NA" is not swallowed as a unit line
     real = [p for p in parts if p.upper() not in UNIT_PLACEHOLDERS]
     return bool(real) and all(is_unit_part(p) for p in parts)
+
+
+def is_too_short(text: str) -> bool:
+    """A stray keystroke rather than a dispatch: one character, or nothing but
+    punctuation. Anything with two or more letters or digits is a real try."""
+    t = text.strip()
+    return len(t) <= 1 or not re.search(r"[A-Za-z0-9]", t)
 
 
 def looks_like_names(line: str) -> bool:
@@ -490,6 +510,10 @@ async def last(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     chat_id = update.effective_chat.id
+
+    if is_too_short(text):
+        await update.message.reply_text(SAMPLE_TEMPLATE)
+        return
 
     edits = parse_edits(text)
     if edits:
