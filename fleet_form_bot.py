@@ -334,6 +334,22 @@ def split_label(line: str) -> tuple[str | None, str]:
 INLINE_NOTE_RE = re.compile(r"\bnotes?\b\s*[:\-]?\s*", re.I)
 
 
+OPENERS, CLOSERS = "([{<", ")]}>"
+
+
+def trim_brackets(before: str, after: str) -> tuple[str, str]:
+    """"TRL hose REPLACE ( note hello )" splits into a before ending in "(" and
+    an after ending in ")". Drop a bracket pair that only wrapped the note,
+    leaving brackets that belong to the text itself alone."""
+    before, after = before.strip(), after.strip()
+    while before and before[-1] in OPENERS:
+        closer = CLOSERS[OPENERS.index(before[-1])]
+        if after.endswith(closer):
+            after = after[:-1].strip()
+        before = before[:-1].strip()
+    return before.rstrip(" -,;:|/").strip(), after
+
+
 def extract_inline_note(lines: list[str]) -> tuple[list[str], str]:
     """Split a note off the middle of a line. Only fires when the message says
     "note" exactly once, so an ambiguous message is left alone rather than
@@ -343,7 +359,7 @@ def extract_inline_note(lines: list[str]) -> tuple[list[str], str]:
     if len(hits) != 1:
         return lines, ""
     i, m = hits[0]
-    before, after = lines[i][:m.start()].strip(), lines[i][m.end():].strip()
+    before, after = trim_brackets(lines[i][:m.start()], lines[i][m.end():])
     if not after:
         return lines, ""
     out = list(lines)
@@ -476,10 +492,13 @@ def parse_pm(text: str, fleet_member: str) -> dict:
     three separate fields."""
     base = parse_message(drop_first_line(text), fleet_member)
     shop = [base["SERVICE"], base["LOC"], base["REPRESENTATIVE"]]
+    # the PM form has one unit field, so a trailer rides along with the truck
+    truck, trailer = base["TRUCK#"], base["TRAILER#"]
+    units = f"{truck or EMPTY_VALUE} | {trailer}" if trailer else truck
     return {
         "FLEET MEMBER": base["FLEET MEMBER"],
         "COMPANY": base["COMPANY"],
-        "TRUCK": base["TRUCK#"],
+        "TRUCK": units,
         "DRIVER": base["DRIVER NAME"],
         # whatever they wrote, else the PM job this form exists for
         "ISSUE": base["ISSUE"] or PM_DEFAULT_ISSUE,
