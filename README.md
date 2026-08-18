@@ -36,6 +36,31 @@ so a carrier actually named "Driver Logistics" is not mistaken for a label.
 A prefix the bot does not recognise (`Ph:`, `Addr:`) does not confuse it either
 — the line is still read as a phone or an address, and stored exactly as sent.
 
+## The PM form
+
+A message whose first line is `pm` gets a different form back:
+
+```
+pm                                         FLEET MEMBER: JACOB
+DM WOLD                                    COMPANY: DM WORLD
+212654                                     TRUCK: 212654
+ISMAEL, HASSAN MOHAMED           ->        DRIVER: ISMAEL, HASSAN MOHAMED
+
+Brothers Truck Repair                      ISSUE: TRK PM SERVICE
+11949 Tramway Dr, Cincinnati, OH 45241
++15134770709                               APP DATE & TIME: 08/18/2026
+
+                                           SERVICE:
+                                           Brothers Truck Repair
+                                           11949 Tramway Dr, Cincinnati, OH 45241
+                                           +15134770709
+```
+
+The shop's name, address and phone are one `SERVICE` block rather than three
+fields. `ISSUE` defaults to `TRK PM SERVICE` (`PM_DEFAULT_ISSUE`) unless the
+message says otherwise, `APP DATE & TIME` is today, and `NOTE` and `WO` stay
+blank for you to fill in.
+
 ## Empty messages
 
 A message with nothing to parse — a stray `1`, `.`, `+` or the like — gets a

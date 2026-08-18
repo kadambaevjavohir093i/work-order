@@ -9,7 +9,8 @@ Setup:
     python fleet_form_bot.py
 
 Usage in Telegram:
-    - Paste the raw message  -> bot replies with the filled form.
+    - Paste the raw message  -> bot replies with the filled repair form.
+    - Start it with "pm"     -> bot replies with the PM form instead.
     - Reply/send edits like  -> QM PO#: 884512
                                 TIME CALLED: 3:40 PM
       and the bot re-sends the corrected form. Replying to a form edits that
@@ -24,6 +25,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from telegram import Update
@@ -83,8 +85,14 @@ FIELDS = [
     "PAYMENT METHOD", "LOC", "NOTE",
 ]
 
+
+def norm_key(k: str) -> str:
+    """'QM PO#' and 'qm po' both -> 'QMPO', so a label can be typed loosely."""
+    return re.sub(r"[^A-Z0-9]", "", k.upper())
+
+
 # how a field may be named at the front of a line, in the message or in an edit
-FIELD_LOOKUP = {k.replace(" ", "").replace("#", "").replace(",", "").upper(): k for k in FIELDS}
+FIELD_LOOKUP = {norm_key(k): k for k in FIELDS}
 FIELD_LOOKUP.update({
     "QM": "QM PO#", "QMPO": "QM PO#", "PO": "QM PO#",
     "TIME": "TIME CALLED", "REP": "REPRESENTATIVE",
@@ -107,6 +115,48 @@ BREAKS_AFTER = {"DRIVER NAME", "TIME CALLED", "ISSUE", "PAYMENT METHOD"}
 
 # always shown in caps, whether parsed from the message or typed as an edit
 UPPER_FIELDS = {"PAYMENT METHOD", "RESPONSIBLE PARTY", "ISSUE", "FLEET MEMBER"}
+
+# ---- the PM form: a message whose first line is "pm" gets this one instead --
+
+PM_TRIGGER = {"PM", "P/M"}
+PM_DEFAULT_ISSUE = "TRK PM SERVICE"
+
+PM_FIELDS = [
+    "FLEET MEMBER", "COMPANY", "TRUCK", "DRIVER",
+    "ISSUE", "APP DATE & TIME", "SERVICE", "NOTE", "WO",
+]
+PM_BREAKS = {"DRIVER": 2, "ISSUE": 1, "APP DATE & TIME": 1, "SERVICE": 1, "NOTE": 1}
+PM_NO_FILL = {"WO", "NOTE"}       # filled in by hand, so no NA
+PM_UPPER = {"FLEET MEMBER", "ISSUE"}
+
+PM_LOOKUP = {norm_key(k): k for k in PM_FIELDS}
+PM_LOOKUP.update({
+    "APP": "APP DATE & TIME", "APPDATE": "APP DATE & TIME",
+    "APPTIME": "APP DATE & TIME", "DATE": "APP DATE & TIME",
+    "TIME": "APP DATE & TIME", "SHOP": "SERVICE", "NOTES": "NOTE",
+    "WORKORDER": "WO", "WO": "WO",
+})
+
+
+class FormSpec(NamedTuple):
+    fields: list
+    breaks: dict     # field -> how many blank lines follow it
+    no_fill: set     # left blank rather than filled with EMPTY_VALUE
+    upper: set
+    lookup: dict
+
+
+REPAIR_FORM = FormSpec(
+    FIELDS, {k: 1 for k in BREAKS_AFTER}, NO_FILL_FIELDS, UPPER_FIELDS, FIELD_LOOKUP,
+)
+PM_FORM = FormSpec(PM_FIELDS, PM_BREAKS, PM_NO_FILL, PM_UPPER, PM_LOOKUP)
+
+ALL_FIELDS = set(FIELDS) | set(PM_FIELDS)
+
+
+def spec_for(f: dict) -> FormSpec:
+    """WO only exists on the PM form, so its presence identifies the form."""
+    return PM_FORM if "WO" in f else REPAIR_FORM
 
 # dropped from FLEET MEMBER — work profiles are often named "Jacob Fleet".
 # Add more words here if your team's profile names carry other job labels.
@@ -255,7 +305,7 @@ def is_shop_block(block: list[str]) -> bool:
 
 # A label is short and made of letters, so a shop name with a colon in it and
 # a sentence ending in one are both left alone.
-LABEL_RE = re.compile(r"^\s*([A-Za-z#,\s]{1,24}?)\s*[:=]\s*(.*)$")
+LABEL_RE = re.compile(r"^\s*([A-Za-z#,&.\s]{1,24}?)\s*[:=]\s*(.*)$")
 
 # Labels that also work with just a space after them. Kept deliberately small:
 # "driver john smith" would be a fair reading, but so would a carrier actually
@@ -269,8 +319,7 @@ def split_label(line: str) -> tuple[str | None, str]:
     or one naming something that is not a field, comes back untouched."""
     m = LABEL_RE.match(line)
     if m:
-        key = m.group(1).replace(" ", "").replace("#", "").replace(",", "").upper()
-        field = FIELD_LOOKUP.get(key)
+        field = FIELD_LOOKUP.get(norm_key(m.group(1)))
         if field:
             return field, m.group(2).strip()
     # "note waiting for parts" — no colon. Only for labels that cannot be
@@ -403,21 +452,68 @@ def parse_message(text: str, fleet_member: str) -> dict:
     return f
 
 
+def is_pm_message(text: str) -> bool:
+    """True when the first line of the message is just "pm"."""
+    triggers = {norm_key(t) for t in PM_TRIGGER}
+    for line in text.splitlines():
+        if line.strip():
+            return norm_key(line) in triggers
+    return False
+
+
+def drop_first_line(text: str) -> str:
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip():
+            return "\n".join(lines[i + 1:])
+    return ""
+
+
+def parse_pm(text: str, fleet_member: str) -> dict:
+    """The PM form asks for the same facts under different names, so run the
+    dispatch parser over the rest of the message and re-label its answers.
+    The shop's name, address and phone are one SERVICE block here rather than
+    three separate fields."""
+    base = parse_message(drop_first_line(text), fleet_member)
+    shop = [base["SERVICE"], base["LOC"], base["REPRESENTATIVE"]]
+    return {
+        "FLEET MEMBER": base["FLEET MEMBER"],
+        "COMPANY": base["COMPANY"],
+        "TRUCK": base["TRUCK#"],
+        "DRIVER": base["DRIVER NAME"],
+        # whatever they wrote, else the PM job this form exists for
+        "ISSUE": base["ISSUE"] or PM_DEFAULT_ISSUE,
+        "APP DATE & TIME": datetime.now(TZ).strftime(DATE_FMT),
+        "SERVICE": "\n".join(s for s in shop if s),
+        "NOTE": base["NOTE"],
+        "WO": "",
+    }
+
+
 # ---------------------------------------------------------------- render ----
 
-def field_value(f: dict, key: str) -> str:
+def field_value(f: dict, key: str, spec: FormSpec | None = None) -> str:
+    spec = spec or spec_for(f)
     val = (f.get(key) or "").strip()
-    if not val and key not in NO_FILL_FIELDS:
+    if not val and key not in spec.no_fill:
         val = EMPTY_VALUE
-    return val.upper() if key in UPPER_FIELDS else val
+    return val.upper() if key in spec.upper else val
+
+
+def form_rows(f: dict):
+    """(label, value, blank lines after) for every row of whichever form."""
+    spec = spec_for(f)
+    for key in spec.fields:
+        yield key, field_value(f, key, spec), spec.breaks.get(key, 0)
 
 
 def render(f: dict) -> str:
     out = []
-    for key in FIELDS:
-        out.append(f"{key}: {field_value(f, key)}".rstrip())
-        if key in BREAKS_AFTER:
-            out.append("")
+    for key, val, gap in form_rows(f):
+        # the PM shop block runs over several lines and sits under its label
+        sep = "\n" if "\n" in val else " "
+        out.append(f"{key}:{sep}{val}".rstrip())
+        out.extend([""] * gap)
     return "\n".join(out)
 
 
@@ -425,36 +521,38 @@ def render_html(f: dict) -> str:
     """Same form with the labels in bold. Values are escaped, so an & or a <
     in a shop name cannot break the markup."""
     out = []
-    for key in FIELDS:
-        line = f"<b>{key}:</b> {html.escape(field_value(f, key))}".rstrip()
-        out.append(line)
-        if key in BREAKS_AFTER:
-            out.append("")
+    for key, val, gap in form_rows(f):
+        sep = "\n" if "\n" in val else " "
+        out.append(f"<b>{key}:</b>{sep}{html.escape(val)}".rstrip())
+        out.extend([""] * gap)
     return "\n".join(out)
 
 
 # ----------------------------------------------------------------- edits ----
 
-EDIT_RE = re.compile(r"^\s*([A-Za-z#,\s]+?)\s*[:=]\s*(.*)$")
-
-FIELD_SET = set(FIELDS)
-
+EDIT_RE = re.compile(r"^\s*([A-Za-z#,&.\s]+?)\s*[:=]\s*(.*)$")
 
 def form_from_text(text: str) -> dict | None:
     """Rebuild a form from one the bot already sent. Telegram hands back the
-    reply's text without the bold markup, so the labels parse straight off."""
-    f = {}
+    reply's text without the bold markup, so the labels parse straight off. A
+    line carrying no label continues the field above it, which is how the PM
+    form's multi-line SERVICE survives the round trip."""
+    f, current = {}, None
     for line in text.splitlines():
         if not line.strip():
             continue
         m = re.match(r"^\s*([^:]+):\s*(.*)$", line)
-        if not m or m.group(1).strip().upper() not in FIELD_SET:
+        key = m.group(1).strip().upper() if m else None
+        if key in ALL_FIELDS:
+            f[key], current = m.group(2).strip(), key
+        elif current is not None:
+            f[current] = f"{f[current]}\n{line.strip()}".strip()
+        else:
             return None
-        f[m.group(1).strip().upper()] = m.group(2).strip()
-    return f or None
+    return f if len(f) >= 3 else None
 
 
-def parse_edits(text: str) -> dict | None:
+def parse_edits(text: str, spec: FormSpec = REPAIR_FORM) -> dict | None:
     edits = {}
     for line in text.splitlines():
         if not line.strip():
@@ -462,10 +560,10 @@ def parse_edits(text: str) -> dict | None:
         m = EDIT_RE.match(line)
         if not m:
             return None
-        key = m.group(1).replace(" ", "").replace("#", "").replace(",", "").upper()
-        if key not in FIELD_LOOKUP:
+        key = norm_key(m.group(1))
+        if key not in spec.lookup:
             return None
-        edits[FIELD_LOOKUP[key]] = m.group(2).strip()
+        edits[spec.lookup[key]] = m.group(2).strip()
     return edits or None
 
 
@@ -481,7 +579,8 @@ def fleet_member_for(update: Update) -> str:
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Send me the raw dispatch message and I'll return the filled form.\n\n"
+        "Send me the raw dispatch message and I'll return the filled form.\n"
+        "Start the message with \"pm\" for the PM form instead.\n\n"
         "Fix a field by sending lines like:\n"
         "QM PO#: 884512\n"
         "TIME CALLED: 3:40 PM\n\n"
@@ -516,14 +615,15 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(SAMPLE_TEMPLATE)
         return
 
-    edits = parse_edits(text)
+    # a reply carries its own form, so corrections still work after a restart
+    # has emptied LAST_FORM — and they name that form's fields, not the other's
+    reply_to = update.message.reply_to_message
+    base = form_from_text(reply_to.text) if reply_to and reply_to.text else None
+    if base is None:
+        base = LAST_FORM.get(chat_id)
+
+    edits = parse_edits(text, spec_for(base) if base else REPAIR_FORM)
     if edits:
-        # a reply carries its own form, so corrections still work after a
-        # restart has emptied LAST_FORM
-        reply_to = update.message.reply_to_message
-        base = form_from_text(reply_to.text) if reply_to and reply_to.text else None
-        if base is None:
-            base = LAST_FORM.get(chat_id)
         if base is None:
             await update.message.reply_text(
                 "No form to edit yet. Send the dispatch message first, then "
@@ -537,7 +637,8 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    f = parse_message(text, fleet_member_for(update))
+    build = parse_pm if is_pm_message(text) else parse_message
+    f = build(text, fleet_member_for(update))
     LAST_FORM[chat_id] = f
     await update.message.reply_text(render_html(f), parse_mode=ParseMode.HTML)
 
