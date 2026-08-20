@@ -44,7 +44,7 @@ TZ = ZoneInfo("America/New_York")   # date follows US ops time, not Tashkent
 DATE_FMT = "%m/%d/%Y"
 DEFAULT_TIME_CALLED = "NA"
 EMPTY_VALUE = "NA"   # shown for any field the message did not fill
-NO_FILL_FIELDS = {"QM PO#", "CASE"}   # except these — left blank to fill in by hand
+NO_FILL_FIELDS = {"QM PO#"}   # except this — left blank to fill in by hand
 
 # SERVICE / REPRESENTATIVE detail level
 SERVICE_FULL_NAME = True   # True -> "Brothers Truck Repair"  | False -> "Brothers"
@@ -80,7 +80,7 @@ PARTY_ONLY_WORDS = [w for w in RESPONSIBLE_WORDS if w not in PAYMENT_WORDS]
 FIELDS = [
     "FLEET MEMBER", "COMPANY", "DRIVER NAME",
     "TRUCK#", "TRAILER#", "PHONE#", "DATE", "TIME CALLED",
-    "SERVICE", "REPRESENTATIVE", "QM PO#", "CASE",
+    "SERVICE", "REPRESENTATIVE", "QM PO#",
     "RESPONSIBLE PARTY", "IF DRIVER, INFORMED", "ISSUE",
     "PAYMENT METHOD", "LOC", "NOTE",
 ]
@@ -152,6 +152,10 @@ REPAIR_FORM = FormSpec(
 PM_FORM = FormSpec(PM_FIELDS, PM_BREAKS, PM_NO_FILL, PM_UPPER, PM_LOOKUP)
 
 ALL_FIELDS = set(FIELDS) | set(PM_FIELDS)
+
+# fields that used to exist: skipped when reading an older form back out of a
+# reply, rather than being mistaken for the previous field's continuation
+RETIRED_FIELDS = {"CASE"}
 
 
 def spec_for(f: dict) -> FormSpec:
@@ -564,6 +568,8 @@ def form_from_text(text: str) -> dict | None:
         key = m.group(1).strip().upper() if m else None
         if key in ALL_FIELDS:
             f[key], current = m.group(2).strip(), key
+        elif key in RETIRED_FIELDS:
+            continue
         elif current is not None:
             f[current] = f"{f[current]}\n{line.strip()}".strip()
         else:
