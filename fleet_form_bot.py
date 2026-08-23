@@ -62,7 +62,7 @@ PAYMENT_WORDS = [
     "tcheck", "t-chek", "tchek", "efs", "efs check",
     "cash", "credit card", "card", "cc", "zelle",
     "direct bill", "billing", "fleet card", "wex", "invoice",
-    "ryder",
+    "ryder", "loves account", "love's account", "loves", "account",
 ]
 
 # who pays — pulled out of the payment line ("comcheck driver pay" -> driver).
